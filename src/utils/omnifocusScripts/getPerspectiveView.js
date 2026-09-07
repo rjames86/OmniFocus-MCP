@@ -50,20 +50,27 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
 
     var evaluateActionAvailability = (task, value) => {
       let result;
+      // task.completed is unreliable for repeating tasks: a completed occurrence
+      // reads back completed:false while task.taskStatus is Completed (the next
+      // occurrence hasn't been generated yet). taskStatus is the source of truth
+      // for whether an action is finished — keying "remaining"/"completed"/
+      // "available" off task.completed let every past occurrence of a repeating
+      // task slip through "Availability: Available" and flood perspectives.
+      const isFinished =
+        task.taskStatus === Task.Status.Completed ||
+        task.taskStatus === Task.Status.Dropped;
       if (value === "remaining") {
-        result = !task.completed && task.taskStatus !== Task.Status.Dropped;
+        result = !isFinished;
       } else if (value === "completed") {
-        result = task.completed;
+        result = task.taskStatus === Task.Status.Completed;
       } else if (value === "dropped") {
         result = task.taskStatus === Task.Status.Dropped;
       } else if (value === "available") {
         // "available" is defined here: https://support.omnigroup.com/documentation/omnifocus/universal/4.3.3/en/glossary/#view-options
-        const isActive =
-          !task.completed && task.taskStatus !== Task.Status.Dropped;
         const isAvailable =
           task.taskStatus !== Task.Status.Blocked &&
           (!task.deferDate || task.deferDate <= new Date());
-        result = isActive && isAvailable;
+        result = !isFinished && isAvailable;
       } else if (value === "firstAvailable") {
         // "firstAvailable" specifically means the Available status
         result = task.taskStatus === Task.Status.Available;

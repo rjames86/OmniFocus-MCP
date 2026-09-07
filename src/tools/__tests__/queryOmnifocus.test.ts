@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { _testExports as primitives } from '../primitives/queryOmnifocus.js';
+import { _testExports as primitives, queryOmnifocus } from '../primitives/queryOmnifocus.js';
 import { _testExports as definitions } from '../definitions/queryOmnifocus.js';
 
-const { escapeJXA, generateFilterConditions, generateFieldMapping } = primitives;
-const { formatTasks, formatProjects, formatFolders, formatQueryResults, validateFields } = definitions;
+const { escapeJXA, generateFilterConditions, generateFieldMapping, validateFields } = primitives;
+const { formatTasks, formatProjects, formatFolders, formatQueryResults } = definitions;
 
 // ============================================================
 // escapeJXA
@@ -648,6 +648,29 @@ describe('validateFields', () => {
 
   it('validates against the folders field set', () => {
     expect(validateFields('folders', ['path', 'projectCount', 'parentFolderID', 'status'])).toEqual([]);
+  });
+});
+
+// ============================================================
+// queryOmnifocus (primitive) - fields validation applies to every caller,
+// not just the query_omnifocus tool handler. Resources (project.ts, flagged.ts,
+// inbox.ts, today.ts) call this primitive directly with their own hardcoded
+// `fields` arrays, bypassing any check that lived only in the tool handler.
+// ============================================================
+describe('queryOmnifocus - fields validation applies to direct callers', () => {
+  it('rejects an invalid field before generating or running any script', async () => {
+    // No OmniFocus/osascript involved: an invalid field must short-circuit
+    // before generateQueryScript / executeOmniFocusScript are ever reached,
+    // which is what makes this safely testable without a live OmniFocus.
+    const result = await queryOmnifocus({ entity: 'tasks', fields: ['bogusField'] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('bogusField');
+  });
+
+  it('names the valid fields for the entity in the error', async () => {
+    const result = await queryOmnifocus({ entity: 'projects', fields: ['nope'] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('folderName');
   });
 });
 

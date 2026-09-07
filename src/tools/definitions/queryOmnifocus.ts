@@ -52,59 +52,14 @@ export const schema = z.object({
   summary: z.boolean().optional().describe("Return only the match count")
 });
 
-// Fields queryOmnifocus can actually populate for each entity. Kept in sync with
-// generateFieldMapping in primitives/queryOmnifocus.ts and the `fields` description
-// above. An unrecognized field silently returns null rather than erroring (raw
-// property access on the underlying OmniJS object), so we reject typos here
-// instead of letting them surface as confusing all-null results.
-const VALID_FIELDS: Record<'tasks' | 'projects' | 'folders', string[]> = {
-  tasks: [
-    'id', 'name', 'note', 'flagged', 'taskStatus', 'dueDate', 'deferDate', 'plannedDate',
-    'effectiveDueDate', 'effectiveDeferDate', 'effectivePlannedDate', 'completionDate',
-    'dropDate', 'effectiveDropDate', 'estimatedMinutes', 'tagNames', 'tags', 'projectName',
-    'projectId', 'parentId', 'childIds', 'hasChildren', 'sequential', 'completedByChildren',
-    'inInbox', 'isRepeating', 'repetitionRule', 'repetitionMethod', 'isPastOccurrence',
-    'modificationDate', 'modified', 'creationDate', 'added',
-  ],
-  projects: [
-    'id', 'name', 'status', 'note', 'flagged', 'folderName', 'folderID', 'sequential',
-    'dueDate', 'deferDate', 'effectiveDueDate', 'effectiveDeferDate', 'completionDate',
-    'dropDate', 'effectiveDropDate', 'completedByChildren', 'containsSingletonActions',
-    'taskCount', 'tasks', 'tagNames', 'isPastOccurrence', 'nextReviewDate', 'reviewInterval',
-    'modificationDate', 'modified', 'creationDate', 'added',
-  ],
-  folders: [
-    'id', 'name', 'path', 'parentFolderID', 'status', 'projectCount', 'projects', 'subfolders',
-  ],
-};
-
 // Backward-looking filters ("within the last N days ago") need the ISO-date branch
 // of resolveDateFilter inverted relative to forward-looking filters like dueWithin —
 // see resolveDateFilter's `direction` param.
 const PAST_LOOKING_DATE_FIELDS = ['addedWithin', 'completedWithin', 'droppedWithin'] as const;
 const FUTURE_LOOKING_DATE_FIELDS = ['dueWithin', 'deferredUntil', 'plannedWithin', 'dueOn', 'deferOn', 'plannedOn', 'addedOn', 'completedOn', 'droppedOn'] as const;
 
-export function validateFields(entity: 'tasks' | 'projects' | 'folders', fields?: string[]): string[] {
-  if (!fields || fields.length === 0) return [];
-  const allowed = new Set(VALID_FIELDS[entity]);
-  return fields.filter(f => !allowed.has(f));
-}
-
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {
-    if (args.fields && args.fields.length > 0) {
-      const invalidFields = validateFields(args.entity, args.fields);
-      if (invalidFields.length > 0) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Invalid field(s) for entity "${args.entity}": ${invalidFields.join(', ')}. Valid fields: ${VALID_FIELDS[args.entity].join(', ')}.`
-          }],
-          isError: true
-        };
-      }
-    }
-
     // Normalize date filter strings to numbers
     const normalizedArgs = { ...args };
     if (normalizedArgs.filters) {
@@ -376,5 +331,4 @@ export const _testExports = {
   formatProjects,
   formatFolders,
   formatQueryResults,
-  validateFields,
 };

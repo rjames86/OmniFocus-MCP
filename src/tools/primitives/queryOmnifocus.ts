@@ -121,7 +121,50 @@ interface QueryResult {
   error?: string;
 }
 
+// Fields queryOmnifocus can actually populate for each entity. Kept in sync with
+// generateFieldMapping below. An unrecognized field silently returns null rather
+// than erroring (raw property access on the underlying OmniJS object), so this is
+// checked here — in the primitive itself, not just the query_omnifocus tool
+// handler — so every caller gets it, including resources (project.ts, flagged.ts,
+// inbox.ts, today.ts) that call this function directly with their own field lists.
+const VALID_FIELDS: Record<'tasks' | 'projects' | 'folders', string[]> = {
+  tasks: [
+    'id', 'name', 'note', 'flagged', 'taskStatus', 'dueDate', 'deferDate', 'plannedDate',
+    'effectiveDueDate', 'effectiveDeferDate', 'effectivePlannedDate', 'completionDate',
+    'dropDate', 'effectiveDropDate', 'estimatedMinutes', 'tagNames', 'tags', 'projectName',
+    'projectId', 'parentId', 'childIds', 'hasChildren', 'sequential', 'completedByChildren',
+    'inInbox', 'isRepeating', 'repetitionRule', 'repetitionMethod', 'isPastOccurrence',
+    'modificationDate', 'modified', 'creationDate', 'added',
+  ],
+  projects: [
+    'id', 'name', 'status', 'note', 'flagged', 'folderName', 'folderID', 'sequential',
+    'dueDate', 'deferDate', 'effectiveDueDate', 'effectiveDeferDate', 'completionDate',
+    'dropDate', 'effectiveDropDate', 'completedByChildren', 'containsSingletonActions',
+    'taskCount', 'tasks', 'tagNames', 'isPastOccurrence', 'nextReviewDate', 'reviewInterval',
+    'modificationDate', 'modified', 'creationDate', 'added',
+  ],
+  folders: [
+    'id', 'name', 'path', 'parentFolderID', 'status', 'projectCount', 'projects', 'subfolders',
+  ],
+};
+
+export function validateFields(entity: 'tasks' | 'projects' | 'folders', fields?: string[]): string[] {
+  if (!fields || fields.length === 0) return [];
+  const allowed = new Set(VALID_FIELDS[entity]);
+  return fields.filter(f => !allowed.has(f));
+}
+
 export async function queryOmnifocus(params: QueryOmnifocusParams): Promise<QueryResult> {
+  if (params.fields && params.fields.length > 0) {
+    const invalidFields = validateFields(params.entity, params.fields);
+    if (invalidFields.length > 0) {
+      return {
+        success: false,
+        error: `Invalid field(s) for entity "${params.entity}": ${invalidFields.join(', ')}. Valid fields: ${VALID_FIELDS[params.entity].join(', ')}.`
+      };
+    }
+  }
+
   try {
     // Create JXA script for the query
     const jxaScript = generateQueryScript(params);
@@ -875,4 +918,5 @@ export const _testExports = {
   generateFilterConditions,
   generateFieldMapping,
   generateQueryScript,
+  validateFields,
 };

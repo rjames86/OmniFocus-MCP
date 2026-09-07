@@ -200,8 +200,16 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
     var evaluateActionHasProjectWithStatus = (task, value) => {
       const project = task.containingProject;
       if (!project) return false;
+      // Project is not an ActiveObject and exposes no effective status, so a
+      // project inside a dropped folder keeps status:Active. Fold the folder
+      // chain in by hand — consistently, not just for stalled/pending.
+      const folderDropped = isAncestorFolderDropped(project);
       if (value === "remaining") {
-        return !project.completed && project.status !== Project.Status.Dropped;
+        return (
+          !project.completed &&
+          project.status !== Project.Status.Dropped &&
+          !folderDropped
+        );
       }
       if (value === "stalled") {
         return isProjectStalled(project);
@@ -210,16 +218,20 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
         const deferDate = project.effectiveDeferDate;
         return (
           project.status === Project.Status.Active &&
-          !isAncestorFolderDropped(project) &&
+          !folderDropped &&
           deferDate !== null &&
           deferDate > new Date()
         );
       }
+      if (value === "dropped") {
+        return project.status === Project.Status.Dropped || folderDropped;
+      }
+      if (value === "active") {
+        return project.status === Project.Status.Active && !folderDropped;
+      }
       const statusMap = {
-        active: Project.Status.Active,
         onHold: Project.Status.OnHold,
         completed: Project.Status.Done,
-        dropped: Project.Status.Dropped,
       };
       return project.status === statusMap[value];
     };

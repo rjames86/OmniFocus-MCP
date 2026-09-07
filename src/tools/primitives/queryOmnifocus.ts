@@ -225,7 +225,16 @@ function generateQueryScript(params: QueryOmnifocusParams): string {
         [Project.Status.Dropped]: "Dropped",
         [Project.Status.OnHold]: "OnHold"
       };
-      
+
+      // Folder.Status is its own enum (Active/Dropped only) — distinct from
+      // Project.Status. The status field mapping used to run every entity's
+      // status through projectStatusMap, so a folder's status looked up a
+      // Project.Status key against Folder.Status values and silently missed.
+      const folderStatusMap = {
+        [Folder.Status.Active]: "Active",
+        [Folder.Status.Dropped]: "Dropped"
+      };
+
       // Helper to collect all descendant folder IDs by walking down from a folder.
       // parentFolder is unreliable on flattenedFolders, so we walk children instead.
       function collectDescendantFolderIds(folder, idSet) {
@@ -760,7 +769,9 @@ function generateFieldMapping(entity: string, fields?: string[]): string {
     } else if (field === 'taskStatus') {
       return `taskStatus: taskStatusMap[item.taskStatus]`;
     } else if (field === 'status') {
-      return `status: projectStatusMap[item.status]`;
+      return entity === 'folders'
+        ? `status: folderStatusMap[item.status]`
+        : `status: projectStatusMap[item.status]`;
     } else if (field === 'modificationDate' || field === 'modified') {
       return entity === 'projects'
         ? `modificationDate: formatDate(${PROJECT_MODIFIED_EXPR})`

@@ -3,7 +3,7 @@ import { _testExports as primitives } from '../primitives/queryOmnifocus.js';
 import { _testExports as definitions } from '../definitions/queryOmnifocus.js';
 
 const { escapeJXA, generateFilterConditions, generateFieldMapping } = primitives;
-const { formatTasks, formatProjects, formatFolders, formatQueryResults } = definitions;
+const { formatTasks, formatProjects, formatFolders, formatQueryResults, validateFields } = definitions;
 
 // ============================================================
 // escapeJXA
@@ -611,6 +611,43 @@ describe('formatQueryResults - no argument echo (#106)', () => {
     expect(formatQueryResults([], 'projects')).toBe(
       'No projects found matching the specified criteria.'
     );
+  });
+});
+
+// ============================================================
+// validateFields - allowlist per entity
+// ============================================================
+describe('validateFields', () => {
+  it('returns no invalid fields when fields is undefined', () => {
+    expect(validateFields('tasks', undefined)).toEqual([]);
+  });
+
+  it('returns no invalid fields when all requested task fields are known', () => {
+    expect(validateFields('tasks', ['id', 'name', 'dueDate', 'tagNames', 'repetitionMethod', 'isPastOccurrence'])).toEqual([]);
+  });
+
+  it('flags a single unknown field', () => {
+    expect(validateFields('tasks', ['id', 'bogusField'])).toEqual(['bogusField']);
+  });
+
+  it('flags multiple unknown fields', () => {
+    expect(validateFields('tasks', ['nope', 'alsoNope'])).toEqual(['nope', 'alsoNope']);
+  });
+
+  it('accepts the modified/added date aliases', () => {
+    expect(validateFields('tasks', ['modified', 'added'])).toEqual([]);
+  });
+
+  it('validates against the projects field set', () => {
+    expect(validateFields('projects', ['folderName', 'reviewInterval', 'tagNames', 'flagged', 'isPastOccurrence'])).toEqual([]);
+  });
+
+  it('flags a task-only field when queried against projects', () => {
+    expect(validateFields('projects', ['plannedDate'])).toEqual(['plannedDate']);
+  });
+
+  it('validates against the folders field set', () => {
+    expect(validateFields('folders', ['path', 'projectCount', 'parentFolderID', 'status'])).toEqual([]);
   });
 });
 

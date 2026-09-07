@@ -19,7 +19,7 @@ export const schema = z.object({
     folderId: z.string().optional().describe("Folder id, including subfolders; tasks match via their containing project"),
     folderName: z.string().optional().describe("Folder name; case-insensitive partial match, may match several folders, each including subfolders. folderId takes precedence"),
     tags: z.array(z.string()).optional().describe("Tag names; exact match, case-sensitive"),
-    status: z.array(z.string()).optional().describe("Tasks: Next, Available, Blocked, DueSoon, Overdue, Completed, Dropped. Projects: Active, OnHold, Done, Dropped"),
+    status: z.array(z.enum(['Next', 'Available', 'Blocked', 'DueSoon', 'Overdue', 'Completed', 'Dropped', 'Active', 'OnHold', 'Done'])).optional().describe("Tasks: Next, Available, Blocked, DueSoon, Overdue, Completed, Dropped. Projects: Active, OnHold, Done, Dropped"),
     flagged: z.boolean().optional().describe("true = flagged only, false = unflagged only"),
     dueWithin: z.union([z.number(), z.string()]).optional().describe("Due between today and the given day/range"),
     deferredUntil: z.union([z.number(), z.string()]).optional().describe("Currently deferred, becoming available by the given day"),
@@ -29,15 +29,15 @@ export const schema = z.object({
     dueOn: z.union([z.number(), z.string()]).optional().describe("Due on exactly that day"),
     deferOn: z.union([z.number(), z.string()]).optional().describe("Defer date exactly that day"),
     plannedOn: z.union([z.number(), z.string()]).optional().describe("Planned date exactly that day"),
-    addedWithin: z.number().optional().describe("Added in the last N days"),
-    addedOn: z.number().optional().describe("Added on day N (0 = today, -1 = yesterday)"),
+    addedWithin: z.union([z.number(), z.string()]).optional().describe("Added in the last N days"),
+    addedOn: z.union([z.number(), z.string()]).optional().describe("Added on day N (0 = today, -1 = yesterday)"),
     isRepeating: z.boolean().optional().describe("true = repeating tasks only"),
-    completedWithin: z.number().optional().describe("Completed in the last N days (dropped items need droppedWithin). Requires includeCompleted: true"),
-    completedOn: z.number().optional().describe("Completed on day N (0 = today, -1 = yesterday). Requires includeCompleted: true"),
-    droppedWithin: z.number().optional().describe("Dropped in the last N days. Requires includeCompleted: true"),
-    droppedOn: z.number().optional().describe("Dropped on day N (0 = today, -1 = yesterday). Requires includeCompleted: true"),
+    completedWithin: z.union([z.number(), z.string()]).optional().describe("Completed in the last N days (dropped items need droppedWithin). Requires includeCompleted: true"),
+    completedOn: z.union([z.number(), z.string()]).optional().describe("Completed on day N (0 = today, -1 = yesterday). Requires includeCompleted: true"),
+    droppedWithin: z.union([z.number(), z.string()]).optional().describe("Dropped in the last N days. Requires includeCompleted: true"),
+    droppedOn: z.union([z.number(), z.string()]).optional().describe("Dropped on day N (0 = today, -1 = yesterday). Requires includeCompleted: true"),
     reviewDue: z.boolean().optional().describe("true = projects due for review (projects only)")
-  }).optional().describe("Filters AND together; array filters (tags, status) OR within the array. Date-valued filters (dueWithin, deferredUntil, plannedWithin, dueOn, deferOn, plannedOn) accept a number of days from today, 'today', 'tomorrow', 'this week', 'next week', or 'YYYY-MM-DD'"),
+  }).optional().describe("Filters AND together; array filters (tags, status) OR within the array. Date-valued filters (dueWithin, deferredUntil, plannedWithin, dueOn, deferOn, plannedOn, addedWithin, addedOn, completedWithin, completedOn, droppedWithin, droppedOn) accept a number of days from today, 'today', 'tomorrow', 'this week', 'next week', or 'YYYY-MM-DD'"),
 
   fields: z.array(z.string()).optional().describe("Only return the listed fields (smaller responses). Tasks: id, name, note, flagged, taskStatus, dueDate, deferDate, plannedDate, effectiveDueDate, effectiveDeferDate, effectivePlannedDate, completionDate, dropDate, effectiveDropDate, estimatedMinutes, tagNames, tags, projectName, projectId, parentId, childIds, hasChildren, sequential, completedByChildren, inInbox, isRepeating, repetitionRule (ICS, e.g. FREQ=WEEKLY;INTERVAL=2), repetitionMethod (Fixed | DeferUntilDate | DueDate), isPastOccurrence, modificationDate, creationDate. Projects: id, name, status, note, folderName, folderID, sequential, dueDate, deferDate, effectiveDueDate, effectiveDeferDate, completionDate, dropDate, effectiveDropDate, completedByChildren, containsSingletonActions, taskCount, tasks, nextReviewDate, reviewInterval, modificationDate, creationDate. Folders: id, name, path, parentFolderID, status, projectCount, projects, subfolders"),
 
@@ -52,16 +52,71 @@ export const schema = z.object({
   summary: z.boolean().optional().describe("Return only the match count")
 });
 
+// Fields queryOmnifocus can actually populate for each entity. Kept in sync with
+// generateFieldMapping in primitives/queryOmnifocus.ts and the `fields` description
+// above. An unrecognized field silently returns null rather than erroring (raw
+// property access on the underlying OmniJS object), so we reject typos here
+// instead of letting them surface as confusing all-null results.
+const VALID_FIELDS: Record<'tasks' | 'projects' | 'folders', string[]> = {
+  tasks: [
+    'id', 'name', 'note', 'flagged', 'taskStatus', 'dueDate', 'deferDate', 'plannedDate',
+    'effectiveDueDate', 'effectiveDeferDate', 'effectivePlannedDate', 'completionDate',
+    'dropDate', 'effectiveDropDate', 'estimatedMinutes', 'tagNames', 'tags', 'projectName',
+    'projectId', 'parentId', 'childIds', 'hasChildren', 'sequential', 'completedByChildren',
+    'inInbox', 'isRepeating', 'repetitionRule', 'repetitionMethod', 'isPastOccurrence',
+    'modificationDate', 'modified', 'creationDate', 'added',
+  ],
+  projects: [
+    'id', 'name', 'status', 'note', 'flagged', 'folderName', 'folderID', 'sequential',
+    'dueDate', 'deferDate', 'effectiveDueDate', 'effectiveDeferDate', 'completionDate',
+    'dropDate', 'effectiveDropDate', 'completedByChildren', 'containsSingletonActions',
+    'taskCount', 'tasks', 'tagNames', 'isPastOccurrence', 'nextReviewDate', 'reviewInterval',
+    'modificationDate', 'modified', 'creationDate', 'added',
+  ],
+  folders: [
+    'id', 'name', 'path', 'parentFolderID', 'status', 'projectCount', 'projects', 'subfolders',
+  ],
+};
+
+// Backward-looking filters ("within the last N days ago") need the ISO-date branch
+// of resolveDateFilter inverted relative to forward-looking filters like dueWithin —
+// see resolveDateFilter's `direction` param.
+const PAST_LOOKING_DATE_FIELDS = ['addedWithin', 'completedWithin', 'droppedWithin'] as const;
+const FUTURE_LOOKING_DATE_FIELDS = ['dueWithin', 'deferredUntil', 'plannedWithin', 'dueOn', 'deferOn', 'plannedOn', 'addedOn', 'completedOn', 'droppedOn'] as const;
+
+export function validateFields(entity: 'tasks' | 'projects' | 'folders', fields?: string[]): string[] {
+  if (!fields || fields.length === 0) return [];
+  const allowed = new Set(VALID_FIELDS[entity]);
+  return fields.filter(f => !allowed.has(f));
+}
+
 export async function handler(args: z.infer<typeof schema>, extra: RequestHandlerExtra) {
   try {
+    if (args.fields && args.fields.length > 0) {
+      const invalidFields = validateFields(args.entity, args.fields);
+      if (invalidFields.length > 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Invalid field(s) for entity "${args.entity}": ${invalidFields.join(', ')}. Valid fields: ${VALID_FIELDS[args.entity].join(', ')}.`
+          }],
+          isError: true
+        };
+      }
+    }
+
     // Normalize date filter strings to numbers
     const normalizedArgs = { ...args };
     if (normalizedArgs.filters) {
       const f = { ...normalizedArgs.filters };
-      const dateFields = ['dueWithin', 'deferredUntil', 'plannedWithin', 'dueOn', 'deferOn', 'plannedOn'] as const;
-      for (const field of dateFields) {
+      for (const field of FUTURE_LOOKING_DATE_FIELDS) {
         if (f[field] !== undefined) {
-          (f as any)[field] = resolveDateFilter(f[field]!);
+          (f as any)[field] = resolveDateFilter(f[field]!, 'future');
+        }
+      }
+      for (const field of PAST_LOOKING_DATE_FIELDS) {
+        if (f[field] !== undefined) {
+          (f as any)[field] = resolveDateFilter(f[field]!, 'past');
         }
       }
       normalizedArgs.filters = f;
@@ -321,4 +376,5 @@ export const _testExports = {
   formatProjects,
   formatFolders,
   formatQueryResults,
+  validateFields,
 };

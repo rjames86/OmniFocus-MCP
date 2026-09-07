@@ -154,6 +154,49 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
     // tasks; the classic GTD reading below ("has work left, but none of it is
     // currently actionable") matched 3 real in-progress projects and is what makes
     // the paired rule non-vacuous.
+    // OmniJS doesn't expose an "effectively active" flag on Project — a project's
+    // own `.status` stays Active even when a containing folder has been dropped,
+    // which hides it from the app despite the field never changing. Walk `.parent`
+    // (not `.parentFolder`, which only exists on Project, not Folder itself) to
+    // check the whole chain.
+    function isAncestorFolderDropped(project) {
+      var folder = project.parentFolder;
+      while (folder) {
+        if (folder.status === Folder.Status.Dropped) return true;
+        folder = folder.parent;
+      }
+      return false;
+    }
+
+    // Memoized per project id for the lifetime of this getPerspectiveViewByName
+    // call: {actionHasProjectWithStatus: "stalled"} is typically paired with
+    // {actionAvailability: "remaining"} at the task level, so evaluateTask calls
+    // into this once per remaining task in a project, not once per project —
+    // without the cache, an N-task stalled project re-scans its own M-task list
+    // N times.
+    var _stalledProjectCache = new Map();
+    function isProjectStalled(project) {
+      const key = project.id.primaryKey;
+      if (_stalledProjectCache.has(key)) return _stalledProjectCache.get(key);
+      const remaining = project.flattenedTasks.filter(
+        (t) => !t.completed && t.taskStatus !== Task.Status.Dropped
+      );
+      const hasActionableTask = remaining.some(
+        (t) =>
+          t.taskStatus === Task.Status.Available ||
+          t.taskStatus === Task.Status.Next ||
+          t.taskStatus === Task.Status.DueSoon ||
+          t.taskStatus === Task.Status.Overdue
+      );
+      const result =
+        project.status === Project.Status.Active &&
+        !isAncestorFolderDropped(project) &&
+        remaining.length > 0 &&
+        !hasActionableTask;
+      _stalledProjectCache.set(key, result);
+      return result;
+    }
+
     var evaluateActionHasProjectWithStatus = (task, value) => {
       const project = task.containingProject;
       if (!project) return false;
@@ -161,26 +204,13 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
         return !project.completed && project.status !== Project.Status.Dropped;
       }
       if (value === "stalled") {
-        const remaining = project.flattenedTasks.filter(
-          (t) => !t.completed && t.taskStatus !== Task.Status.Dropped
-        );
-        const hasActionableTask = remaining.some(
-          (t) =>
-            t.taskStatus === Task.Status.Available ||
-            t.taskStatus === Task.Status.Next ||
-            t.taskStatus === Task.Status.DueSoon ||
-            t.taskStatus === Task.Status.Overdue
-        );
-        return (
-          project.status === Project.Status.Active &&
-          remaining.length > 0 &&
-          !hasActionableTask
-        );
+        return isProjectStalled(project);
       }
       if (value === "pending") {
         const deferDate = project.effectiveDeferDate;
         return (
           project.status === Project.Status.Active &&
+          !isAncestorFolderDropped(project) &&
           deferDate !== null &&
           deferDate > new Date()
         );
@@ -252,6 +282,7 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
     var DATE_FIELD_PROPERTY = {
       due: "dueDate",
       defer: "deferDate",
+      planned: "plannedDate",
       completed: "completionDate",
       dropped: "dropDate",
       added: "added",
@@ -286,6 +317,23 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
       return fieldDate.toDateString() === tomorrow.toDateString();
     };
 
+    // Shared by evaluateActionDateIsInThePast/InTheNext, which are identical
+    // apart from the offset's sign and which side of `now` the window falls on.
+    // Keeping the hour/day/week/month/year cases in one place means a future
+    // fix (a new component, a unit bug) can't be applied to one side and
+    // forgotten on the other — exactly the class of bug this file was already
+    // full of.
+    function applyRelativeOffset(date, amount, component, sign) {
+      const delta = sign * amount;
+      if (component === "hour") date.setHours(date.getHours() + delta);
+      else if (component === "day") date.setDate(date.getDate() + delta);
+      else if (component === "week") date.setDate(date.getDate() + delta * 7);
+      else if (component === "month") date.setMonth(date.getMonth() + delta);
+      else if (component === "year") date.setFullYear(date.getFullYear() + delta);
+      else return null;
+      return date;
+    }
+
     var evaluateActionDateIsInThePast = (task, dateField, value) => {
       const fieldDate = getTaskDateField(task, dateField);
       if (!fieldDate) return false;
@@ -301,20 +349,8 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
         return fieldDate <= now;
       }
 
-      const cutoff = new Date();
-      if (relativeComponent === "hour") {
-        cutoff.setHours(cutoff.getHours() - relativeBeforeAmount);
-      } else if (relativeComponent === "day") {
-        cutoff.setDate(cutoff.getDate() - relativeBeforeAmount);
-      } else if (relativeComponent === "week") {
-        cutoff.setDate(cutoff.getDate() - relativeBeforeAmount * 7);
-      } else if (relativeComponent === "month") {
-        cutoff.setMonth(cutoff.getMonth() - relativeBeforeAmount);
-      } else if (relativeComponent === "year") {
-        cutoff.setFullYear(cutoff.getFullYear() - relativeBeforeAmount);
-      } else {
-        return fieldDate <= now;
-      }
+      const cutoff = applyRelativeOffset(new Date(), relativeBeforeAmount, relativeComponent, -1);
+      if (!cutoff) return fieldDate <= now;
       return fieldDate >= cutoff && fieldDate <= now;
     };
 
@@ -337,20 +373,8 @@ function getPerspectiveViewByName(perspectiveName, limit = 100) {
         return fieldDate >= now;
       }
 
-      const cutoff = new Date();
-      if (relativeComponent === "hour") {
-        cutoff.setHours(cutoff.getHours() + relativeAfterAmount);
-      } else if (relativeComponent === "day") {
-        cutoff.setDate(cutoff.getDate() + relativeAfterAmount);
-      } else if (relativeComponent === "week") {
-        cutoff.setDate(cutoff.getDate() + relativeAfterAmount * 7);
-      } else if (relativeComponent === "month") {
-        cutoff.setMonth(cutoff.getMonth() + relativeAfterAmount);
-      } else if (relativeComponent === "year") {
-        cutoff.setFullYear(cutoff.getFullYear() + relativeAfterAmount);
-      } else {
-        return fieldDate >= now;
-      }
+      const cutoff = applyRelativeOffset(new Date(), relativeAfterAmount, relativeComponent, 1);
+      if (!cutoff) return fieldDate >= now;
       return fieldDate <= cutoff && fieldDate >= now;
     };
 
